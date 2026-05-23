@@ -1,0 +1,28 @@
+name: Deploy to FlatRun
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: flatrun/actions/setup-flatrun@v1
+        with:
+          version: 0.1.0
+
+      - name: Roll out the new image
+        run: flatrun deployment deploy api --pull
+        env:
+          FLATRUN_URL: ${{ vars.FLATRUN_URL }}
+          FLATRUN_TOKEN: ${{ secrets.FLATRUN_TOKEN }}
+
+      - name: Verify health
+        run: flatrun health
+        env:
+          FLATRUN_URL: ${{ vars.FLATRUN_URL }}
+          FLATRUN_TOKEN: ${{ secrets.FLATRUN_TOKEN }}

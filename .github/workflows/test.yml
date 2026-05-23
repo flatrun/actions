@@ -1,0 +1,36 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'CLI version to test against'
+        required: true
+        default: '0.1.0'
+
+jobs:
+  setup:
+    name: setup-flatrun (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: install
+        uses: ./setup-flatrun
+        with:
+          version: ${{ github.event.inputs.version || '0.1.0' }}
+
+      - name: Binary is on PATH
+        run: |
+          which flatrun
+          flatrun version
+
+      - name: Output path is set
+        run: test -x "${{ steps.install.outputs.path }}"

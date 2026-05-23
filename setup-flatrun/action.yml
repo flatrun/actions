@@ -1,0 +1,38 @@
+name: 'Setup FlatRun CLI'
+description: 'Download a pinned release of the FlatRun CLI and add it to PATH.'
+branding:
+  icon: 'box'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'FlatRun CLI version to install (e.g., 0.1.0 or v0.1.0).'
+    required: true
+  install-dir:
+    description: 'Directory the binary is placed into. Defaults to the runner tool cache, or ~/.flatrun/bin off-runner.'
+    required: false
+    default: ''
+  repository:
+    description: 'Source repository for release assets. Override to install from a fork.'
+    required: false
+    default: 'flatrun/cli'
+
+outputs:
+  version:
+    description: 'The CLI version that was installed.'
+    value: ${{ inputs.version }}
+  path:
+    description: 'Absolute path to the installed flatrun binary.'
+    value: ${{ steps.install.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: install
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_INSTALL_DIR: ${{ inputs.install-dir }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+      run: ${{ github.action_path }}/install.sh
