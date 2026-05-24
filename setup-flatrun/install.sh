@@ -40,14 +40,14 @@ echo "Downloading flatrun v${VERSION} for ${OS}/${ARCH} from ${REPOSITORY}..."
 if ! gh release download "v${VERSION}" \
       --repo "$REPOSITORY" \
       --pattern "*${OS}*${ARCH}*"; then
-  echo "::error::Release v${VERSION} not found, or no asset matches ${OS}/${ARCH}." >&2
-  echo "::error::Confirm the release exists with: gh release view v${VERSION} --repo ${REPOSITORY}" >&2
+  echo "::error::Failed to download flatrun v${VERSION} for ${OS}/${ARCH} from ${REPOSITORY}." >&2
+  echo "::error::See the gh error above. Confirm the release exists and is accessible: gh release view v${VERSION} --repo ${REPOSITORY}" >&2
   exit 1
 fi
 
 shopt -s nullglob
-for archive in *.tar.gz *.tgz; do tar -xzf "$archive"; done
-for archive in *.zip; do unzip -q "$archive"; done
+for archive in *.tar.gz *.tgz; do tar -xzf "$archive" && rm -f "$archive"; done
+for archive in *.zip; do unzip -q "$archive" && rm -f "$archive"; done
 shopt -u nullglob
 
 BIN="$(find . -type f -name 'flatrun' -print -quit)"
@@ -55,6 +55,7 @@ if [ -z "$BIN" ]; then
   BIN="$(find . -type f \( -name 'flatrun-*' -o -name 'flatrun_*' \) \
           ! -name '*.sha256' ! -name '*.sha512' \
           ! -name '*.sig'    ! -name '*.asc'    \
+          ! -name '*.tar.gz' ! -name '*.tgz' ! -name '*.zip' \
           -print -quit)"
 fi
 if [ -z "$BIN" ]; then
