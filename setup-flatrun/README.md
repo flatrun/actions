@@ -7,7 +7,7 @@ Downloads a pinned release of the [FlatRun CLI](https://github.com/flatrun/cli),
 ```yaml
 - uses: flatrun/actions/setup-flatrun@v1
   with:
-    version: 0.1.0
+    version: 0.3.0
 
 - run: flatrun version
 ```

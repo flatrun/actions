@@ -13,7 +13,7 @@ jobs:
 
       - uses: flatrun/actions/setup-flatrun@v1
         with:
-          version: 0.1.0
+          version: 0.3.0
 
       - name: Roll out the new image
         run: flatrun deployment deploy api --pull
