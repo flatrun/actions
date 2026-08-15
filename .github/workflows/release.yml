@@ -1,0 +1,23 @@
+name: Release
+
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - VERSION
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: whilesmart/workflows/tagged-release@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Consumers pin @v1, which the README recommends, so it has to follow each 1.x release.
+          major_tag: 'true'
