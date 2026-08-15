@@ -28,6 +28,12 @@ jobs:
 
 See [`examples/`](./examples) for fuller workflows.
 
+## Releasing
+
+The version lives in `VERSION`. Changing it on `main` releases it: the tag is created, `v1` moves
+to it, and the release notes come from the matching `CHANGELOG.md` heading. A release run against
+an unchanged `VERSION` fails rather than releasing the same thing twice.
+
 ## Versioning
 
 Each action is consumed by Git ref. Recommended pinning, in order of strictness:
