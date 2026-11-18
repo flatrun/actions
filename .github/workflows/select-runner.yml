@@ -1,0 +1,156 @@
+name: Select CI Runner
+on:
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        default: auto
+      runner:
+        type: string
+        default: ''
+      shared_compute:
+        type: boolean
+        default: false
+      hosted_runner:
+        type: string
+        default: ubuntu-latest
+      fallback_labels:
+        type: string
+        default: ''
+    secrets:
+      ORG_BILLING_TOKEN:
+        required: false
+    outputs:
+      runner:
+        value: ${{ jobs.select.outputs.runner }}
+      self_hosted:
+        value: ${{ jobs.select.outputs.self_hosted }}
+permissions:
+  contents: read
+jobs:
+  select:
+    name: Select CI Runner
+    runs-on: ${{ fromJSON(((inputs.mode == 'flatrun' || (inputs.mode != 'github' && vars.CI_FALLBACK_ENABLED == 'true')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && (vars.CI_CONTROL_RUNNER || '["self-hosted","flatrun"]') || '"ubuntu-latest"') }}
+    timeout-minutes: 3
+    outputs:
+      runner: ${{ steps.fixed.outputs.runner || steps.shared.outputs.runner || steps.quota.outputs.use-runner }}
+      self_hosted: ${{ contains(steps.fixed.outputs.runner || steps.shared.outputs.runner || steps.quota.outputs.use-runner, 'self-hosted') }}
+    steps:
+      - name: Select fixed runner
+        id: fixed
+        env:
+          HOSTED: ${{ inputs.hosted_runner }}
+          MODE: ${{ inputs.mode }}
+          PROVIDED_RUNNER: ${{ inputs.runner }}
+          ENABLED: ${{ vars.CI_FALLBACK_ENABLED }}
+          FALLBACK: ${{ inputs.fallback_labels || vars.CI_FLATRUN_LABELS || 'self-hosted,flatrun' }}
+          TRUSTED: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          mode = os.environ['MODE']
+          if mode not in ('auto', 'github', 'flatrun'):
+              raise SystemExit('Runner mode must be auto, github or flatrun')
+          trusted = os.environ['TRUSTED'] == 'true'
+          if not trusted:
+              runner = 'ubuntu-latest'
+          elif os.environ['PROVIDED_RUNNER']:
+              runner = json.loads(os.environ['PROVIDED_RUNNER'])
+          elif mode == 'github' or (mode == 'auto' and os.environ['ENABLED'] != 'true'):
+              runner = os.environ['HOSTED']
+          elif mode == 'flatrun':
+              runner = [label.strip() for label in os.environ['FALLBACK'].split(',') if label.strip()]
+          else:
+              runner = None
+          if runner is not None:
+              if not (isinstance(runner, str) and runner or isinstance(runner, list) and runner and all(isinstance(label, str) and label for label in runner)):
+                  raise SystemExit('Runner must be a label or a non-empty array of labels')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  output.write('runner=' + json.dumps(runner, separators=(',', ':')) + '\n')
+          PYCODE
+      - name: Prefer included GitHub minutes, then FlatRun
+        if: steps.fixed.outputs.runner == '' && !inputs.shared_compute
+        id: quota
+        uses: hutch-fail/github-runner-then-fallback@b57e8832ca404d6a931485bb1a300ae2851385ca
+        with:
+          github-token: ${{ secrets.ORG_BILLING_TOKEN }}
+          organization: ${{ github.repository_owner }}
+          included-minutes: ${{ vars.CI_INCLUDED_MINUTES }}
+          primary-runner: ${{ inputs.hosted_runner }}
+          fallback-runner: ${{ inputs.fallback_labels || vars.CI_FLATRUN_LABELS || 'self-hosted,flatrun' }}
+          final-runner: ''
+          fallback-on-error: 'false'
+      - name: Select by organization compute allowance
+        id: shared
+        if: steps.fixed.outputs.runner == '' && inputs.shared_compute
+        env:
+          GH_TOKEN: ${{ secrets.ORG_BILLING_TOKEN }}
+          HOSTED: ${{ inputs.hosted_runner }}
+          FALLBACK: ${{ inputs.fallback_labels || vars.CI_FLATRUN_LABELS || 'self-hosted,flatrun' }}
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import json
+          import subprocess
+          import os
+          from datetime import datetime, timezone
+          from decimal import Decimal
+
+          if not os.environ.get("GH_TOKEN"):
+              raise ValueError("An organization billing token is required")
+          OWNER = os.environ["GITHUB_REPOSITORY_OWNER"]
+          FREE_COMPUTE_USD = Decimal("12")
+          STANDARD_COMPUTE = {
+              "actions_linux", "actions_linux_slim", "actions_linux_arm",
+              "actions_macos", "actions_windows", "actions_windows_arm",
+          }
+
+
+          def api(endpoint):
+              result = subprocess.check_output(["gh", "api", endpoint], text=True)
+              return json.loads(result, parse_float=Decimal)
+
+
+          def compute_amount(endpoint, period, skus):
+              summary = api(endpoint)
+              if summary["timePeriod"] != period:
+                  raise ValueError("Unexpected billing summary period")
+              return sum((item["grossAmount"] for item in summary["usageItems"]
+                          if item["sku"] in skus), Decimal(0))
+
+
+          def check_quota(now=None):
+              if api(f"orgs/{OWNER}")["plan"]["name"] != "free":
+                  raise ValueError("Review the included compute allowance for the new plan")
+              now = now or datetime.now(timezone.utc)
+              period = now.strftime("%Y-%m")
+              query = f"year={now.year}&month={now.month}"
+              billing = f"orgs/{OWNER}/settings/billing/usage"
+              report = api(f"{billing}?{query}")
+              repositories = set()
+              for row in report["usageItems"]:
+                  if row["organizationName"] != OWNER or not row["date"].startswith(period + "-"):
+                      raise ValueError("Unexpected billing period or organization")
+                  if row["product"] == "actions" and row["unitType"] == "Minutes":
+                      repositories.add(row["repositoryName"])
+              expected_period = {"year": now.year, "month": now.month}
+              used = compute_amount(f"{billing}/summary?{query}&product=sandbox", expected_period,
+                                    {"sandbox_linux", "sandbox_memory"})
+              for repo in sorted(repositories):
+                  name = f"{OWNER}/{repo}"
+                  if not api(f"repos/{name}")["private"]:
+                      continue
+                  used += compute_amount(f"{billing}/summary?{query}&repository={name}",
+                                         expected_period, STANDARD_COMPUTE)
+              print(f"{period} eligible compute: ${used:.3f} of ${FREE_COMPUTE_USD}")
+              return used >= FREE_COMPUTE_USD
+
+
+          labels = [label.strip() for label in os.environ["FALLBACK"].split(",") if label.strip()]
+          if "self-hosted" not in labels:
+              raise ValueError("Shared compute fallback requires the self-hosted label")
+          runner = labels if check_quota() else os.environ["HOSTED"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("runner=" + json.dumps(runner, separators=(",", ":")) + "\n")
+          PYCODE

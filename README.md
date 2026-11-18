@@ -61,3 +61,11 @@ docker run --rm -v "$(pwd):/repo" rhysd/actionlint:latest -color
 ```
 
 Each action is a standalone directory with an `action.yml`. Keep them dependency-free at the action layer; push logic into the CLI.
+
+## Select a CI runner
+
+Call the reusable workflow `.github/workflows/select-runner.yml` and pin it to a revision. Its `runner` output is JSON for `runs-on: ${{ fromJSON(needs.select.outputs.runner) }}`. Its `self_hosted` output is the string `true` or `false`.
+
+Set the caller's `CI_FALLBACK_ENABLED` repository variable to `true` to enable automatic fallback. Provide a control runner that remains available when hosted minutes run out. Its labels default to `["self-hosted","flatrun"]`; set `CI_CONTROL_RUNNER` to override them. The control runner needs Python 3 and GitHub CLI.
+
+Pass `ORG_BILLING_TOKEN` as a workflow secret with organization billing access and read access to contributing private repositories. With `shared_compute: true`, the workflow compares the Free organization's monthly included compute allowance with reported private standard Actions usage and eligible sandbox usage. It selects `hosted_runner` while allowance remains and the comma-separated `fallback_labels` once it is exhausted. The default policy meters Linux minutes using `CI_INCLUDED_MINUTES`. Billing errors fail the check. GitHub billing updates can lag. Fork pull requests use GitHub-hosted Ubuntu.
